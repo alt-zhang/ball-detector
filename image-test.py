@@ -10,31 +10,41 @@ WEIGHTS = "best.onnx"
 
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
-SCORE_THRESHOLD = 0.2
-NMS_THRESHOLD = 0.4
-# Lower = senstive -> higher = less senstive
-CONFIDENCE_THRESHOLD = 0.9
+# SCORE_THRESHOLD = 0.2
+# NMS_THRESHOLD = 0.4
+# CONFIDENCE_THRESHOLD = 0.9
+# Thanks Muhie
+ACTUAL_THRESHOLD = 0.3
+# Usually class IDs are always like 0.9... *shrug*
+CLASSID_THRESHOLD = 0.75
 
 # The camera to stream from
 CAMERA = 0
 
 # Seconds between each AI capture
 DELAY = 1
+# How many seconds to increment and decrement the delay
+DELAY_INCREMENT = 0.2
+
+# How many pixels from the center when the robot should move forward
+BALL_LEEWAY = 100
+
+FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 ###################################################
 
 # Basically useless, Pi lacks Nvida GPU
-def build_model(is_cuda):
-    net = cv2.dnn.readNet(WEIGHTS)
-    if is_cuda:
-        print("Attempty to use CUDA")
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA_FP16)
-    else:
-        print("Running on CPU")
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-    return net
+# def build_model(is_cuda):
+#     net = cv2.dnn.readNet(WEIGHTS)
+#     if is_cuda:
+#         print("Attempty to use CUDA")
+#         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+#         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA_FP16)
+#     else:
+#         print("Running on CPU")
+#         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+#         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+#     return net
 
 def detect(image, net):
     blob = cv2.dnn.blobFromImage(image, 1/255.0, (INPUT_WIDTH, INPUT_HEIGHT), swapRB=True, crop=False)
@@ -57,12 +67,13 @@ def wrap_detection(input_image, output_data):
     for r in range(rows):
         row = output_data[r]
         confidence = row[4]
-        if confidence >= 0.4:
+        if confidence >= ACTUAL_THRESHOLD:
 
             classes_scores = row[5:]
             _, _, _, max_indx = cv2.minMaxLoc(classes_scores)
             class_id = max_indx[1]
-            if (classes_scores[class_id] > .25):
+            print(classes_scores[class_id])
+            if (classes_scores[class_id] > CLASSID_THRESHOLD):
 
                 confidences.append(confidence)
 
@@ -78,19 +89,6 @@ def wrap_detection(input_image, output_data):
 
     indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.25, 0.45) 
 
-    """
-    result_class_ids = []
-    result_confidences = []
-    result_boxes = []
-
-    for i in indexes:
-        result_confidences.append(confidences[i])
-        result_class_ids.append(class_ids[i])
-        result_boxes.append(boxes[i])
-
-    return result_class_ids, result_confidences, result_boxes
-    """
-
     return class_ids, confidences, boxes
 
 def format_yolov5(frame):
@@ -105,9 +103,15 @@ class_list = ["Balls"]
 colors = [(255, 255, 0), (0, 255, 0), (0, 255, 255), (255, 0, 0)]
 
 # Basically usefull, Pi doesn't have a Nvida GPU
-is_cuda = len(sys.argv) > 1 and sys.argv[1] == "cuda"
+# is_cuda = len(sys.argv) > 1 and sys.argv[1] == "cuda"
+# net = build_model(is_cuda)
 
-net = build_model(is_cuda)
+net = cv2.dnn.readNet(WEIGHTS)
+net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
+print("Model loaded")
+
 capture = cv2.VideoCapture(CAMERA)
 
 total_frames = 0
@@ -125,32 +129,39 @@ while True:
     current_time = time.time()
     time_difference = current_time - last_capture_time
     fps_label = f"Delay: {delay:.1f} | Last: {time_difference:.2f} | Next: {delay-time_difference:.2f}"
-    cv2.putText(frame, fps_label, (0, 20), cv2.FONT_HERSHEY_SIMPLEX, .8, (0,0,255), 2)
+    cv2.putText(frame, fps_label, (0, 20), FONT, .8, (0,0,255), 2)
     
     if time_difference >= delay:
+        # Ball found flag is used to ensure the robot doesn't try and follow 2
+        # balls, which could cause it to be stuck rotating between them
+        ball_found = False
+
         inputImage = format_yolov5(frame)
         outs = detect(inputImage, net)
-
         class_ids, confidences, boxes = wrap_detection(inputImage, outs[0])
 
         total_frames += 1
 
         last_capture_time = current_time
 
+        print("-------------------- DETECTED BALLS --------------------")
+
         if (not boxes):
             print("Nothing found, move right")
 
     for (classid, confidence, box) in zip(class_ids, confidences, boxes):
+        # Box variable is in format [top_left_x, top_left_y, box_width, box_height]
+
         color = colors[int(classid) % len(colors)]
         cv2.rectangle(frame, box, color, 2)
         cv2.rectangle(frame, (box[0], box[1] - 20), (box[0] + box[2], box[1]), color, -1)
         box_text = f"{class_list[classid]} {confidence:.3f}"
-        cv2.putText(frame, box_text, (box[0], box[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, .5, (0,0,255))
+        cv2.putText(frame, box_text, (box[0], box[1] - 10), FONT, .5, (0,0,255))
 
         box_centerx = int(box[0] + box[2] / 2)
         box_centery = int(box[1] + box[3] / 2)
 
-        cv2.rectangle(frame, (box_centerx-10, box_centery-10), (box_centerx+10, box_centery+10), (0, 0, 255), -1)
+        cv2.rectangle(frame, (box_centerx-5, box_centery-5, 10, 10), (0, 0, 255), -1)
 
         if time_difference >= delay:
             image_width, image_height, _ = inputImage.shape           
@@ -159,12 +170,18 @@ while True:
             
             print(f"Ball found at center {box_centerx}, {box_centery}")
 
-            if box_centerx > image_centerx + 100:
-                print("Image to the right, move right")
-            elif box_centerx < image_centerx - 100:
-                print("Image to the left, move left")
+            # Use ball found flag to determine if we traget this ball or not
+            # We do not want to target 2 balls at once
+            if not ball_found:
+                ball_found = True
+                if box_centerx > image_centerx + BALL_LEEWAY:
+                    print("Image to the right, move right")
+                elif box_centerx < image_centerx - BALL_LEEWAY:
+                    print("Image to the left, move left")
+                else:
+                    print("Looks good, move forward")
             else:
-                print("Looks good, move forward")
+                print("Already tragetting a ball")
 
     cv2.imshow("output", frame)
 
