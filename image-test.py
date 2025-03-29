@@ -6,7 +6,7 @@ import sys
 
 #################### CONSTANTS ####################
 
-WEIGHTS = "best.onnx"
+WEIGHTS = "best-complete.onnx"
 
 INPUT_WIDTH = 640
 INPUT_HEIGHT = 640
@@ -14,12 +14,12 @@ INPUT_HEIGHT = 640
 # NMS_THRESHOLD = 0.4
 # CONFIDENCE_THRESHOLD = 0.9
 # Thanks Muhie
-ACTUAL_THRESHOLD = 0.3
+ACTUAL_THRESHOLD = 0.4
 # Usually class IDs are always like 0.9... *shrug*
 CLASSID_THRESHOLD = 0.75
 
 # The camera to stream from
-CAMERA = 0
+CAMERA = 2
 
 # Seconds between each AI capture
 DELAY = 1
@@ -98,7 +98,7 @@ def format_yolov5(frame):
     return result
 
 def main():
-    class_list = ["Balls"]
+    class_list = ["Ping Ball", "Rugby Ball"]
     colors = [(255, 255, 0), (0, 255, 0), (0, 255, 255), (255, 0, 0)]
 
     # Basically useless, Pi doesn't have a Nvida GPU
